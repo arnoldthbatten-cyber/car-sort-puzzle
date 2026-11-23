@@ -1,0 +1,10 @@
+{
+  "timeZone": "UTC",
+  "dependencies": {},
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "ANYONE"
+  },
+  "exceptionLogging": "REMOTE",
+  "runtimeVersion": "V8"
+}

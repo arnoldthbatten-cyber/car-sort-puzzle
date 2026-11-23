@@ -1,0 +1,272 @@
+<!-- ===== UI: rendering, animation, input ===== -->
+<script>
+(function() {
+  'use strict';
+
+  var gs = window.CarSort;
+  var state = gs.state;
+
+  // --- DOM References ---
+  var lanesContainer = document.getElementById('lanes-container');
+  var levelLabel = document.getElementById('level-label');
+  var movesLabel = document.getElementById('moves-label');
+  var btnUndo = document.getElementById('btn-undo');
+  var btnRestart = document.getElementById('btn-restart');
+  var btnHint = document.getElementById('btn-hint');
+  var btnSound = document.getElementById('btn-sound');
+  var iconSoundOn = document.getElementById('icon-sound-on');
+  var iconSoundOff = document.getElementById('icon-sound-off');
+  var winOverlay = document.getElementById('win-overlay');
+  var homeOverlay = document.getElementById('home-overlay');
+  var winStars = document.getElementById('win-stars');
+  var winStats = document.getElementById('win-stats');
+  var homeStats = document.getElementById('home-stats');
+  var capInfo = document.getElementById('cap-info');
+
+  // --- Sound Toggle ---
+  window._soundOn = true;
+  btnSound.addEventListener('click', function() {
+    window._soundOn = !window._soundOn;
+    iconSoundOn.style.display = window._soundOn ? 'block' : 'none';
+    iconSoundOff.style.display = window._soundOn ? 'none' : 'block';
+  });
+
+  // --- Car SVG Generator ---
+  function carSVG(colorIdx) {
+    var c = gs.COLORS[colorIdx];
+    if (!c) return '';
+    return '<svg viewBox="0 0 80 50" xmlns="http://www.w3.org/2000/svg">' +
+      '<rect x="8" y="14" width="64" height="24" rx="6" fill="' + c.body + '" />' +
+      '<rect x="20" y="10" width="40" height="12" rx="4" fill="' + c.roof + '" opacity="0.85" />' +
+      '<rect x="10" y="22" width="12" height="8" rx="3" fill="' + c.roof + '" opacity="0.5" />' +
+      '<rect x="58" y="22" width="12" height="8" rx="3" fill="' + c.roof + '" opacity="0.5" />' +
+      '<rect x="14" y="36" width="12" height="6" rx="2" fill="#1e293b" />' +
+      '<rect x="54" y="36" width="12" height="6" rx="2" fill="#1e293b" />' +
+      '<rect x="68" y="18" width="6" height="6" rx="2" fill="#fef08a" />' +
+      '<rect x="6" y="18" width="4" height="6" rx="2" fill="#f87171" />' +
+      '</svg>';
+  }
+
+  // --- Render ---
+  function render() {
+    var capacity = state.capacity;
+    var numLanes = state.lanes.length;
+
+    document.documentElement.style.setProperty('--lane-capacity', capacity);
+
+    var html = '';
+    for (var i = 0; i < numLanes; i++) {
+      var lane = state.lanes[i];
+      var isEmpty = lane.length === 0;
+      var isSelected = state.selectedLane === i;
+      var cls = 'lane' + (isEmpty ? ' empty' : '') + (isSelected ? ' selected' : '');
+      var laneHeight = capacity * 52;
+      html += '<div class="' + cls + '" data-lane="' + i + '" style="height:' + laneHeight + 'px">';
+
+      for (var j = 0; j < lane.length; j++) {
+        html += '<div class="car">' + carSVG(lane[j]) + '</div>';
+      }
+
+      html += '</div>';
+    }
+    lanesContainer.innerHTML = html;
+
+    levelLabel.textContent = 'Level ' + state.level;
+    movesLabel.textContent = state.moves + ' moves';
+    btnUndo.disabled = state.history.length === 0 || state.solved;
+    btnHint.disabled = state.solved;
+
+    capInfo.textContent = capacity;
+  }
+
+  // --- Input Handling ---
+  lanesContainer.addEventListener('click', function(e) {
+    var laneEl = e.target.closest('.lane');
+    if (!laneEl || state.solved) return;
+
+    var laneIdx = parseInt(laneEl.getAttribute('data-lane'), 10);
+
+    if (state.selectedLane === -1) {
+      if (state.lanes[laneIdx].length === 0) return;
+      state.selectedLane = laneIdx;
+      playSound('select');
+    } else if (state.selectedLane === laneIdx) {
+      state.selectedLane = -1;
+    } else {
+      if (gs.isLegalMove(state.selectedLane, laneIdx)) {
+        gs.moveCar(state.selectedLane, laneIdx);
+        playSound('move');
+      } else {
+        if (state.lanes[laneIdx].length > 0) {
+          state.selectedLane = laneIdx;
+          playSound('select');
+        } else {
+          state.selectedLane = -1;
+        }
+        return;
+      }
+    }
+
+    if (gs.isSolved()) {
+      handleWin();
+    }
+
+    render();
+  });
+
+  // --- Undo ---
+  btnUndo.addEventListener('click', function() {
+    if (gs.undoMove()) {
+      playSound('undo');
+    }
+    render();
+  });
+
+  // --- Restart ---
+  btnRestart.addEventListener('click', function() {
+    gs.generateLevel(state.level);
+    render();
+  });
+
+  // --- Hint ---
+  btnHint.addEventListener('click', function() {
+    var hint = gs.getHintMove();
+    if (!hint) return;
+
+    var laneEls = lanesContainer.querySelectorAll('.lane');
+    var fromEl = laneEls[hint.from];
+    var toEl = laneEls[hint.to];
+
+    if (fromEl) fromEl.classList.add('hint-highlight');
+    if (toEl) toEl.classList.add('hint-highlight');
+
+    playSound('select');
+
+    setTimeout(function() {
+      if (fromEl) fromEl.classList.remove('hint-highlight');
+      if (toEl) toEl.classList.remove('hint-highlight');
+    }, 1500);
+  });
+
+  // --- Win Handling ---
+  function handleWin() {
+    state.solved = true;
+    playSound('win');
+
+    var par = gs.getPar(state.level);
+    var stars = gs.computeStars(state.moves, par);
+    gs.saveStar(state.level, stars);
+    gs.saveProgress();
+
+    winStars.textContent = '';
+    for (var s = 0; s < 3; s++) {
+      winStars.textContent += s < stars ? '⭐' : '☆';
+    }
+    winStats.innerHTML = state.moves + ' moves (par: ' + par + ')<br>Time: ' + formatTime(getGameTime());
+
+    winOverlay.classList.remove('hidden');
+    render();
+  }
+
+  // --- Game Timer ---
+  var gameStartTime = 0;
+  var elapsedTime = 0;
+  var timerInterval = null;
+
+  function startTimer() {
+    gameStartTime = Date.now() - elapsedTime;
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(function() {
+      elapsedTime = Date.now() - gameStartTime;
+      if (state.solved) return;
+      movesLabel.textContent = state.moves + ' moves &bull; ' + formatTime(elapsedTime);
+    }, 500);
+  }
+
+  function stopTimer() {
+    if (timerInterval) clearInterval(timerInterval);
+    elapsedTime = Date.now() - gameStartTime;
+  }
+
+  function getGameTime() {
+    return elapsedTime;
+  }
+
+  function formatTime(ms) {
+    var s = Math.floor(ms / 1000);
+    var m = Math.floor(s / 60);
+    s = s % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  // --- Home Screen ---
+  homeOverlay.classList.remove('hidden');
+
+  function updateHomeStats() {
+    var progress = gs.loadProgress();
+    var stars = progress && progress.stars ? progress.stars : {};
+    var totalStars = 0;
+    var maxStars = 0;
+    for (var key in stars) {
+      totalStars += stars[key];
+      maxStars += 3;
+    }
+    if (Object.keys(stars).length === 0) {
+      homeStats.innerHTML = 'Start playing to track your progress!';
+    } else {
+      homeStats.innerHTML = totalStars + ' / ' + maxStars + ' stars earned';
+    }
+  }
+  updateHomeStats();
+
+  // --- Play / Next Level ---
+  document.getElementById('btn-play').addEventListener('click', function() {
+    homeOverlay.classList.add('hidden');
+    var progress = gs.loadProgress();
+    var level = 1;
+    if (progress && progress.level) {
+      level = progress.level + 1;
+    }
+    startLevel(level);
+  });
+
+  document.getElementById('btn-next').addEventListener('click', function() {
+    winOverlay.classList.add('hidden');
+    startLevel(state.level + 1);
+  });
+
+  document.getElementById('btn-home').addEventListener('click', function() {
+    winOverlay.classList.add('hidden');
+    homeOverlay.classList.remove('hidden');
+    updateHomeStats();
+  });
+
+  // --- Level Start ---
+  function startLevel(level) {
+    stopTimer();
+    state.level = level;
+    gs.generateLevel(level);
+    render();
+    startTimer();
+  }
+
+  // --- Keyboard Support ---
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      gs.undoMove();
+      playSound('undo');
+      render();
+    }
+    if (e.key === 'r' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      gs.generateLevel(state.level);
+      render();
+    }
+  });
+
+  // --- Initial Render ---
+  render();
+
+})();
+</script>

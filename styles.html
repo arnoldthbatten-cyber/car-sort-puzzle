@@ -1,0 +1,219 @@
+/* ===== Car Sort Puzzle - Styles ===== */
+
+/* --- Reset & Base --- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-light: #334155;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --accent: #6366f1;
+  --accent-hover: #818cf0;
+  --lane-bg: #1a2332;
+  --lane-border: #334155;
+  --selected-glow: rgba(99, 102, 241, 0.5);
+  --lane-capacity: 4;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* --- Top Bar --- */
+#topbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--lane-border);
+  flex-shrink: 0;
+}
+
+#topbar button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#topbar button:hover { background: var(--surface-light); color: var(--text); }
+#topbar button:disabled { opacity: 0.3; cursor: default; }
+#topbar button:hover:disabled { background: none; color: var(--text-muted); }
+
+#level-label {
+  font-weight: 700;
+  font-size: 16px;
+  min-width: 70px;
+  text-align: center;
+}
+#moves-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  min-width: 60px;
+  text-align: center;
+}
+
+/* --- Game Area --- */
+#game-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+#lanes-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  width: 100%;
+}
+
+/* --- Lane --- */
+.lane {
+  position: relative;
+  width: calc(20% - 8px);
+  min-width: 56px;
+  max-width: 80px;
+  background: var(--lane-bg);
+  border: 2px solid var(--lane-border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  /* height set dynamically via JS */
+}
+
+.lane:hover { border-color: var(--accent); }
+.lane.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 16px var(--selected-glow);
+}
+.lane.hint-highlight {
+  border-color: #facc15;
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.4);
+}
+.lane.empty {
+  border-style: dashed;
+  opacity: 0.5;
+}
+
+/* --- Car --- */
+.car {
+  width: 70%;
+  height: calc(100% / var(--lane-capacity));
+  transition: transform 0.25s ease-out;
+  flex-shrink: 0;
+}
+
+.car.lift {
+  transform: translateY(-12px);
+}
+
+/* --- Car SVG --- */
+.car svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+}
+
+/* --- Overlays --- */
+.hidden { display: none !important; }
+
+#win-overlay, #home-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.win-card, .home-card {
+  background: var(--surface);
+  border-radius: 20px;
+  padding: 32px;
+  text-align: center;
+  max-width: 320px;
+  width: 85%;
+  border: 1px solid var(--lane-border);
+}
+
+.win-card h2, .home-card h1 {
+  margin-bottom: 12px;
+  font-size: 24px;
+}
+
+.win-card p, .home-card p {
+  color: var(--text-muted);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.stars {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+#win-stats, #home-stats {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+
+/* --- Responsive --- */
+@media (max-width: 400px) {
+  .lane { min-width: 48px; }
+  .win-card, .home-card { padding: 24px; }
+}
+
+/* --- Animations --- */
+@keyframes popIn {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.win-card, .home-card {
+  animation: popIn 0.3s ease-out;
+}

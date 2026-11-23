@@ -1,0 +1,512 @@
+<!-- ===== Game Logic: state, rules, level generation, solver ===== -->
+<script>
+(function() {
+  'use strict';
+
+  // --- Color Palette ---
+  var COLORS = [
+    { name: 'red',    body: '#ef4444', roof: '#dc2626' },
+    { name: 'blue',   body: '#3b82f6', roof: '#2563eb' },
+    { name: 'green',  body: '#22c55e', roof: '#16a34a' },
+    { name: 'yellow', body: '#eab308', roof: '#ca8a04' },
+    { name: 'purple', body: '#a855f7', roof: '#9333ea' },
+    { name: 'orange', body: '#f97316', roof: '#ea580c' },
+    { name: 'pink',   body: '#ec4899', roof: '#db2777' },
+    { name: 'cyan',   body: '#06b6d4', roof: '#0891b2' },
+    { name: 'lime',   body: '#84cc16', roof: '#65a30d' },
+    { name: 'rose',   body: '#f43f5e', roof: '#e11d48' },
+    { name: 'sky',    body: '#0ea5e9', roof: '#0284c7' },
+    { name: 'violet', body: '#8b5cf6', roof: '#7c3aed' },
+  ];
+
+  /** Get difficulty config for a given level */
+  function getDifficulty(level) {
+    var entries = [
+      { maxLevel: 10,   colors: 4,  empty: 2, cap: 4 },
+      { maxLevel: 30,   colors: 6,  empty: 2, cap: 4 },
+      { maxLevel: 60,   colors: 9,  empty: 2, cap: 4 },
+      { maxLevel: 100,  colors: 11, empty: 1, cap: 4 },
+      { maxLevel: 9999, colors: 12, empty: 2, cap: 5 },
+    ];
+    for (var i = 0; i < entries.length; i++) {
+      if (level <= entries[i].maxLevel) {
+        return {
+          numColors: entries[i].colors,
+          emptyLanes: entries[i].empty,
+          capacity: entries[i].cap,
+        };
+      }
+    }
+    return { numColors: 12, emptyLanes: 2, capacity: 5 };
+  }
+
+  function getColorsForLevel(level) {
+    var d = getDifficulty(level);
+    return COLORS.slice(0, d.numColors);
+  }
+  function getCapacityForLevel(level) {
+    return getDifficulty(level).capacity;
+  }
+
+  // --- State ---
+  var state = {
+    lanes: [],        // Array of arrays, bottom → top
+    capacity: 4,
+    moves: 0,
+    history: [],      // Stack of {from, to}
+    selectedLane: -1,
+    colors: [],       // Array of color objects for current level
+    level: 1,
+    solved: false,
+  };
+
+  // --- Rules ---
+
+  function topOf(lane) {
+    return lane.length > 0 ? lane[lane.length - 1] : null;
+  }
+
+  /** Check if a move from lane 'from' to lane 'to' is legal */
+  function isLegalMove(from, to) {
+    if (from === to) return false;
+    if (state.lanes[from].length === 0) return false;
+    if (state.lanes[to].length >= state.capacity) return false;
+    var srcColor = state.lanes[from][state.lanes[from].length - 1];
+    var tgtTop = topOf(state.lanes[to]);
+    if (tgtTop !== null && tgtTop !== srcColor) return false;
+    return true;
+  }
+
+  /** Execute a move (pushes to history) */
+  function moveCar(from, to) {
+    var color = state.lanes[from].pop();
+    state.lanes[to].push(color);
+    state.moves++;
+    state.history.push({ from: from, to: to });
+    state.selectedLane = -1;
+  }
+
+  /** Undo the last move */
+  function undoMove() {
+    if (state.history.length === 0) return false;
+    var last = state.history.pop();
+    var color = state.lanes[last.to].pop();
+    state.lanes[last.from].push(color);
+    state.moves = Math.max(0, state.moves - 1);
+    state.selectedLane = -1;
+    return true;
+  }
+
+  /** Check if the puzzle is solved */
+  function isSolved() {
+    for (var i = 0; i < state.lanes.length; i++) {
+      var lane = state.lanes[i];
+      if (lane.length === 0) continue;
+      if (lane.length !== state.capacity) return false;
+      var firstColor = lane[0];
+      for (var j = 1; j < lane.length; j++) {
+        if (lane[j] !== firstColor) return false;
+      }
+    }
+    return true;
+  }
+
+  // --- Level Generation (Reverse Simulation) ---
+
+  function generateLevel(level) {
+    var colors = getColorsForLevel(level);
+    var capacity = getDifficulty(level).capacity;
+    var numColors = colors.length;
+    var emptyLanes = getDifficulty(level).emptyLanes;
+    state.capacity = capacity;
+    state.colors = colors;
+
+    var totalLanes = numColors + emptyLanes;
+
+    // Start from solved state
+    var lanes = [];
+    for (var i = 0; i < numColors; i++) {
+      var lane = [];
+      for (var j = 0; j < capacity; j++) {
+        lane.push(i); // color index
+      }
+      lanes.push(lane);
+    }
+    for (var k = 0; k < emptyLanes; k++) {
+      lanes.push([]);
+    }
+
+    // Calculate reverse moves based on level difficulty
+    var reverseMoves = 5 + level * 2;
+
+    for (var r = 0; r < reverseMoves; r++) {
+      var src, dst;
+      var attempts = 0;
+      do {
+        src = Math.floor(Math.random() * totalLanes);
+        dst = Math.floor(Math.random() * totalLanes);
+        attempts++;
+        if (attempts > 50) break;
+      } while (
+        lanes[src].length === 0 ||
+        lanes[dst].length >= capacity ||
+        src === dst
+      );
+
+      if (attempts <= 50) {
+        var colorIdx = lanes[src].pop();
+        lanes[dst].push(colorIdx);
+      }
+    }
+
+    state.lanes = lanes;
+    state.moves = 0;
+    state.history = [];
+    state.selectedLane = -1;
+    state.solved = false;
+  }
+
+  // --- Solver (BFS) for hints and par ---
+
+  /**
+   * BFS solver. Returns the minimum move count, or null if unsolvable/timed out.
+   * Uses canonical state hashing and processes in frames to avoid UI freeze.
+   */
+  function solveLevel() {
+    var capacity = state.capacity;
+    var numLanes = state.lanes.length;
+    var MAX_NODES = 150000;
+    var BATCH = 4000;
+
+    function canonical(lanes) {
+      var parts = [];
+      var empties = 0;
+      for (var i = 0; i < lanes.length; i++) {
+        if (lanes[i].length === 0) empties++;
+        else parts.push(JSON.stringify(lanes[i]));
+      }
+      parts.sort();
+      var result = parts;
+      for (var e = 0; e < empties; e++) result.push('[]');
+      return result.join('|');
+    }
+
+    function makeMove(lanes, from, to) {
+      var copy = [];
+      for (var i = 0; i < lanes.length; i++) {
+        if (i === from) copy.push(lanes[i].slice(0, -1));
+        else if (i === to) copy.push(lanes[i].concat(lanes[from][lanes[from].length - 1]));
+        else copy.push(lanes[i].slice());
+      }
+      return copy;
+    }
+
+    function isWin(lanes) {
+      for (var i = 0; i < lanes.length; i++) {
+        var l = lanes[i];
+        if (l.length === 0) continue;
+        if (l.length !== capacity) return false;
+        for (var j = 1; j < l.length; j++) { if (l[j] !== l[0]) return false; }
+      }
+      return true;
+    }
+
+    var startKey = canonical(state.lanes);
+    if (isWin(state.lanes)) return 0;
+
+    var queue = [state.lanes];
+    var visited = {};
+    visited[startKey] = true;
+    var depth = 0;
+    var explored = 0;
+
+    // BFS by depth waves
+    function processWave() {
+      depth++;
+      var nextQueue = [];
+      var count = 0;
+
+      while (queue.length > 0 && count < BATCH) {
+        var lanes = queue.shift();
+        count++;
+        explored++;
+        if (explored > MAX_NODES) return false;
+
+        for (var f = 0; f < numLanes; f++) {
+          if (lanes[f].length === 0) continue;
+          var color = lanes[f][lanes[f].length - 1];
+          for (var t = 0; t < numLanes; t++) {
+            if (f === t) continue;
+            if (lanes[t].length >= capacity) continue;
+            var top = lanes[t].length > 0 ? lanes[t][lanes[t].length - 1] : null;
+            if (top !== null && top !== color) continue;
+
+            var next = makeMove(lanes, f, t);
+            var key = canonical(next);
+            if (visited[key]) continue;
+            visited[key] = true;
+
+            if (isWin(next)) return true;
+            nextQueue.push(next);
+          }
+        }
+      }
+
+      queue = nextQueue;
+      if (queue.length === 0) return false;
+      setTimeout(processWave, 0);
+      return true;
+    }
+
+    return processWave() ? depth : null;
+  }
+
+  /**
+   * Gets a single hint move: finds a legal move that reduces unsolved cars.
+   * Much faster than full BFS.
+   */
+  function getHintMove() {
+    var capacity = state.capacity;
+    var numLanes = state.lanes.length;
+    var bestMove = null;
+    var bestScore = -Infinity;
+
+    for (var f = 0; f < numLanes; f++) {
+      if (state.lanes[f].length === 0) continue;
+      var srcColor = state.lanes[f][state.lanes[f].length - 1];
+      for (var t = 0; t < numLanes; t++) {
+        if (f === t) continue;
+        if (state.lanes[t].length >= capacity) continue;
+        var tgtTop = state.lanes[t].length > 0 ? state.lanes[t][state.lanes[t].length - 1] : null;
+        if (tgtTop !== null && tgtTop !== srcColor) continue;
+
+        // Score this move
+        var score = 0;
+        // Prefer moves that complete a lane
+        if (state.lanes[t].length + 1 === capacity) score += 10;
+        // Prefer moving from a lane where the car below matches
+        if (state.lanes[f].length > 1 && state.lanes[f][state.lanes[f].length - 2] === srcColor) {
+          score += 3;
+        }
+        // Prefer filling a non-empty lane over an empty one (saves empty lanes for later)
+        if (tgtTop !== null) score += 1;
+        // Avoid using the last empty lane if possible
+        var emptyCount = 0;
+        for (var e = 0; e < numLanes; e++) {
+          if (state.lanes[e].length === 0) emptyCount++;
+        }
+        if (emptyCount <= 1 && state.lanes[t].length === 0) score -= 20;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMove = { from: f, to: t };
+        }
+      }
+    }
+
+    return bestMove;
+  }
+
+  function getSolvedState() {
+    var lanes = [];
+    for (var i = 0; i < state.colors.length; i++) {
+      var lane = [];
+      for (var j = 0; j < state.capacity; j++) {
+        lane.push(i);
+      }
+      lanes.push(lane);
+    }
+    var empty = getDifficulty(state.level).emptyLanes;
+    for (var k = 0; k < empty; k++) lanes.push([]);
+    return lanes;
+  }
+
+  function isSolvedState(lanes) {
+    for (var i = 0; i < lanes.length; i++) {
+      var lane = lanes[i];
+      if (lane.length === 0) continue;
+      if (lane.length !== state.capacity) return false;
+      for (var j = 1; j < lane.length; j++) {
+        if (lane[j] !== lane[0]) return false;
+      }
+    }
+    return true;
+  }
+
+  // --- Persistence ---
+
+  function getPlayerId() {
+    if (!window._playerId) {
+      window._playerId = localStorage.getItem('carSort_playerId');
+      if (!window._playerId) {
+        window._playerId = 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+        localStorage.setItem('carSort_playerId', window._playerId);
+      }
+    }
+    return window._playerId;
+  }
+
+  function getUserHash() {
+    return getPlayerId().slice(0, 12);
+  }
+
+  function loadProgress() {
+    try {
+      var raw = localStorage.getItem('carSort_progress');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return null;
+  }
+
+  function saveProgress() {
+    try {
+      var progress = {
+        level: state.level,
+        stars: getStarsProgress(),
+        timestamp: Date.now(),
+      };
+      localStorage.setItem('carSort_progress', JSON.stringify(progress));
+
+      // Optional: sync to GAS (debounced, only on level complete)
+      if (window._syncTimeout) clearTimeout(window._syncTimeout);
+      window._syncTimeout = setTimeout(function() {
+        if (typeof google !== 'undefined' && google.script && google.script.run) {
+          google.script.run.withFailureHandler(function() {}).saveProgress(progress);
+        }
+      }, 2000);
+    } catch (e) {
+      console.warn('Failed to save progress:', e);
+    }
+  }
+
+  function getStarsProgress() {
+    var raw = loadProgress();
+    return raw && raw.stars ? raw.stars : {};
+  }
+
+  function saveStar(level, stars) {
+    var progress = loadProgress() || {};
+    progress.stars = progress.stars || {};
+    if (!progress.stars[level] || progress.stars[level] < stars) {
+      progress.stars[level] = stars;
+    }
+    try { localStorage.setItem('carSort_progress', JSON.stringify(progress)); } catch(e) {}
+  }
+
+  function computeStars(moves, par) {
+    if (par === null) return 1; // unsolvable by solver, give 1 star anyway
+    if (moves <= par) return 3;
+    if (moves <= Math.ceil(par * 1.5)) return 2;
+    return 1;
+  }
+
+  function getPar(level) {
+    var colors = getColorsForLevel(level).length;
+    var capacity = getDifficulty(level).capacity;
+    var empty = getDifficulty(level).emptyLanes;
+    // Approximate par based on complexity
+    var base = colors * capacity;
+    return Math.max(base, Math.ceil(base * (1 + (empty === 1 ? 0.3 : 0) + (capacity > 4 ? 0.2 : 0))));
+  }
+
+  // --- Daily Puzzle ---
+
+  function getDailySeed() {
+    var now = new Date();
+    return now.getFullYear().toString() +
+           (now.getMonth() + 1).toString().padStart(2, '0') +
+           now.getDate().toString().padStart(2, '0');
+  }
+
+  function getDailyLevel() {
+    var seed = getDailySeed();
+    var hash = 0;
+    for (var i = 0; i < seed.length; i++) {
+      hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash) % 30 + 1; // Levels 1-30 for daily
+  }
+
+  // --- Sound ---
+
+  var audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    if (!window._soundOn) return;
+    try {
+      var ctx = getAudioCtx();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'select') {
+        osc.frequency.value = 600;
+        gain.gain.value = 0.08;
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.06);
+      } else if (type === 'move') {
+        osc.frequency.value = 400;
+        osc.frequency.linearRampToValueAtTime(500, ctx.currentTime + 0.08);
+        gain.gain.value = 0.06;
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.08);
+      } else if (type === 'undo') {
+        osc.frequency.value = 300;
+        osc.frequency.linearRampToValueAtTime(200, ctx.currentTime + 0.1);
+        gain.gain.value = 0.06;
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.1);
+      } else if (type === 'win') {
+        // Arpeggio
+        var notes = [523, 659, 784, 1047];
+        notes.forEach(function(freq, i) {
+          var o = ctx.createOscillator();
+          var g = ctx.createGain();
+          o.connect(g);
+          g.connect(ctx.destination);
+          o.frequency.value = freq;
+          g.gain.value = 0.08;
+          o.start(ctx.currentTime + i * 0.12);
+          o.stop(ctx.currentTime + i * 0.12 + 0.15);
+        });
+      }
+    } catch (e) {
+      // Audio not supported
+    }
+  }
+
+  // --- Export ---
+  window.CarSort = {
+    COLORS: COLORS,
+    state: state,
+    isLegalMove: isLegalMove,
+    moveCar: moveCar,
+    undoMove: undoMove,
+    isSolved: isSolved,
+    generateLevel: generateLevel,
+    solveLevel: solveLevel,
+    getPlayerId: getPlayerId,
+    getUserHash: getUserHash,
+    loadProgress: loadProgress,
+    saveProgress: saveProgress,
+    saveStar: saveStar,
+    computeStars: computeStars,
+    getPar: getPar,
+    getHintMove: getHintMove,
+    getDailyLevel: getDailyLevel,
+    playSound: playSound,
+    getDifficulty: getDifficulty,
+    getColorsForLevel: getColorsForLevel,
+    getCapacityForLevel: getCapacityForLevel,
+  };
+
+})();
+</script>

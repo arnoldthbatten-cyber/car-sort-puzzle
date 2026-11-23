@@ -1,0 +1,13 @@
+# Google Apps Script - local configs
+.clasprc.json
+.clasp.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
