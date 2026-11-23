@@ -1,10 +1,10 @@
 {
-  "timeZone": "UTC",
+  "timeZone": "America/New_York",
   "dependencies": {},
   "webapp": {
-    "executeAs": "USER_DEPLOYING",
-    "access": "ANYONE"
+    "access": "ANYONE_ANONYMOUS",
+    "executeAs": "USER_DEPLOYING"
   },
-  "exceptionLogging": "REMOTE",
+  "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8"
 }
